@@ -62,20 +62,22 @@ SENSITIVE_REFUSAL_EN = """This is a sensitive matter that requires expert review
 
 Please contact our staff bot: https://t.me/JGGLSTAFFBOT
 
-# Confidentiality refusal messages
-SOURCES_REFUSAL = """I cannot share document sources, filenames, or internal references. 
-
-If you need more information or details about our policies, please contact our staff bot:
-https://t.me/JGGLSTAFFBOT"""
-
-# Sensitive question refusal
-SENSITIVE_REFUSAL = """This is a sensitive matter that requires expert review. 
-
-Please contact our staff bot: https://t.me/JGGLSTAFFBOT
-
 When you message them, please include:
 1) A short description of the problem (what you're trying to do + what happens instead)
 2) A screenshot of the error / the screen you're stuck on
 3) The exchange name
 4) Your device (iOS / Android / Web)
-5) The exact error text (copy/paste if possible
+5) The exact error text (copy/paste if possible)
+"""
+
+SENSITIVE_REFUSAL_RU = """Это чувствительный вопрос, требующий экспертной проверки.
+
+Пожалуйста, свяжитесь с нашим staff-ботом: https://t.me/JGGLSTAFFBOT
+
+Когда вы им напишете, укажите:
+1) Краткое описание проблемы (что делаете и что происходит)
+2) Скриншот ошибки / экрана, где застряли
+3) Название биржи
+4) Устройство (iOS / Android / Web)
+5) Точный текст ошибки (если можно — скопируйте)
+"""
