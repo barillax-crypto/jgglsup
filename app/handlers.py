@@ -66,13 +66,12 @@ async def cmd_start(message: Message) -> None:
     db = get_db()
     user = db.get_user(user_id)
 
-    if user:
-        # User already exists
-        await message.answer("You're already set up! Ask me anything about KYC and onboarding.")
-    else:
+    if not user:
         # Create new user
         db.set_user_language(user_id, "en")
-        await message.answer("Welcome! I help with questions about US crypto exchange onboarding and KYC. Ask me anything!")
+
+    await message.answer("Hi! My name is Jiggley. I'm an artificial intelligence assistant that will help you set everything up.")
+    await message.answer("To get started, tell me: What exchange are you on? What step are you stuck on? Include an error message or screenshot if possible.")
 
 
 @router.message(Command("help"))

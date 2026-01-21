@@ -70,7 +70,7 @@ class Database:
         return dict(row) if row else None
 
     def set_user_language(self, telegram_id: int, language: str) -> None:
-        """Create or update user language."""
+        """Create or update user (language param kept for compatibility, always uses en)."""
         conn = self._get_connection()
         cursor = conn.cursor()
         now = datetime.utcnow().isoformat()
@@ -79,17 +79,16 @@ class Database:
         if existing:
             cursor.execute(
                 "UPDATE users SET language = ? WHERE telegram_id = ?",
-                (language, telegram_id),
+                ("en", telegram_id),
             )
         else:
             cursor.execute(
                 "INSERT INTO users (telegram_id, language, created_at) VALUES (?, ?, ?)",
-                (telegram_id, language, now),
+                (telegram_id, "en", now),
             )
 
         conn.commit()
         conn.close()
-        logger.info(f"User {telegram_id} language set to {language}")
 
     def log_interaction(
         self,
