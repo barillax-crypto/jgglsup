@@ -114,15 +114,12 @@ async def cmd_reset(message: Message) -> None:
 
 @router.message(Command("upload_doc"))
 async def cmd_upload_doc(message: Message) -> None:
-    """Handle /upload_doc command (admin only)."""
-    if not is_admin(message.from_user.id):
-        await message.answer("You don't have permission to use this command.")
-        return
-, private chat)."""
+    """Handle /upload_doc command (admin only, private chat)."""
     if not is_admin(message.from_user.id) or not is_private_chat(message):
-        await message.answer("This command is not availablen"
-        "Supported formats: .pdf, .txt, .md"
-    )
+        await message.answer(
+            "This command is not available.\n"
+            "Supported formats: .pdf, .txt, .md"
+        )
 
 
 @router.message(Command("reindex"))
