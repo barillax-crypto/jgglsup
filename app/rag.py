@@ -18,12 +18,11 @@ class RAGSystem:
 
     def __init__(self):
         """Initialize RAG system with Chroma."""
-        settings = Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=str(Config.CHROMA_PERSIST_DIR),
-            anonymized_telemetry=False,
+        settings = Settings(anonymized_telemetry=False)
+        self.client = chromadb.PersistentClient(
+            path=str(Config.CHROMA_PERSIST_DIR),
+            settings=settings,
         )
-        self.client = chromadb.Client(settings)
         self.collection = self.client.get_or_create_collection(
             name="knowledge_base",
             metadata={"hnsw:space": "cosine"},
