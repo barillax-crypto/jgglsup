@@ -13,16 +13,10 @@ from app.db import get_db
 from app.ingest import ingest_document
 from app.openrouter import get_openrouter_client
 from app.prompts import (
-    LANGUAGE_PROMPT_EN,
-    LANGUAGE_PROMPT_RU,
-    SYSTEM_PROMPT_EN,
-    SYSTEM_PROMPT_RU,
-    ESCALATION_TEMPLATE_EN,
-    ESCALATION_TEMPLATE_RU,
-    SOURCES_REFUSAL_EN,
-    SOURCES_REFUSAL_RU,
-    SENSITIVE_REFUSAL_EN,
-    SENSITIVE_REFUSAL_RU,
+    SYSTEM_PROMPT,
+    ESCALATION_TEMPLATE,
+    SOURCES_REFUSAL,
+    SENSITIVE_REFUSAL,
 )
 from app.rag import get_rag_system
 
@@ -72,44 +66,27 @@ async def cmd_start(message: Message) -> None:
     db = get_db()
     user = db.get_user(user_id)
 
-    if user and user["language"]:
-        # User already set language
+    if user:
+        # User already exists
         await message.answer("You're already set up! Ask me anything about KYC and onboarding.")
     else:
-        # Ask for language
-        await message.answer(LANGUAGE_PROMPT_EN)
+        # Create new user
+        db.set_user_language(user_id, "en")
+        await message.answer("Welcome! I help with questions about US crypto exchange onboarding and KYC. Ask me anything!")
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     """Handle /help command."""
-    db = get_db()
-    user = db.get_user(message.from_user.id)
-
-    if user and user["language"] == "ru":
-        help_text = (
-            "Я помогаю с вопросами о регистрации на крипто-бирже в США и KYC.\n\n"
-            "Просто задайте вопрос, и я постараюсь ответить на основе предоставленных материалов.\n"
-            "Если я не уверен, я передам вас в поддержку.\n\n"
-            "/reset — изменить язык"
-        )
-    else:
-        help_text = (
-            "I help with questions about US crypto exchange onboarding and KYC.\n\n"
-            "Just ask a question and I'll try to answer based on the provided materials.\n"
-            "If I'm not sure, I'll escalate to support.\n\n"
-            "/reset — change language"
-        )
-
+    help_text = (
+        "I help with questions about US crypto exchange onboarding and KYC.\n\n"
+        "Just ask a question and I'll try to answer based on the provided materials.\n"
+        "If I'm not sure, I'll escalate to support.\n\n"
+        "/upload_doc — Upload a document (admin only)\n"
+        "/reindex — Reindex all documents (admin only)"
+    )
     await message.answer(help_text)
 
-
-@router.message(Command("reset"))
-async def cmd_reset(message: Message) -> None:
-    """Handle /reset command to change language."""
-    db = get_db()
-    db.set_user_language(message.from_user.id, "")
-    await message.answer(LANGUAGE_PROMPT_EN)
 
 
 @router.message(Command("upload_doc"))
@@ -225,46 +202,23 @@ async def handle_message(message: Message) -> None:
     db = get_db()
     user = db.get_user(user_id)
 
-    # Handle language selection
-    if not user or not user["language"]:
-        if user_text.upper() in ["EN", "RU"]:
-            language = "en" if user_text.upper() == "EN" else "ru"
-            db.set_user_language(user_id, language)
-
-            if language == "ru":
-                await message.answer(
-                    "Спасибо! Теперь я готов ответить на ваши вопросы о KYC и регистрации на бирже."
-                )
-            else:
-                await message.answer(
-                    "Thanks! Now I'm ready to answer your questions about KYC and exchange onboarding."
-                )
-        else:
-            await message.answer(LANGUAGE_PROMPT_EN)
-        return
-
-    language = user["language"]
-    is_russian = language == "ru"
+    # Create user if not exists
+    if not user:
+        db.set_user_language(user_id, "en")
 
     # Check for sensitive/banned topics
     if is_sensitive_topic(user_text):
         logger.warning(f"Sensitive topic detected from user {user_id}: {user_text[:50]}")
-        refusal = SENSITIVE_REFUSAL_RU if is_russian else SENSITIVE_REFUSAL_EN
-        await message.answer(refusal)
+        await message.answer(SENSITIVE_REFUSAL)
         db.log_interaction(user_id, user_text, "refused", internal_sources="sensitive_topic")
         return
 
     # Check for source/document requests
     if is_source_request(user_text):
         logger.info(f"Source request from user {user_id}: {user_text[:50]}")
-        refusal = SOURCES_REFUSAL_RU if is_russian else SOURCES_REFUSAL_EN
-        await message.answer(refusal)
+        await message.answer(SOURCES_REFUSAL)
         db.log_interaction(user_id, user_text, "refused", internal_sources="source_request")
         return
-
-    # Get system prompt and templates
-    system_prompt = SYSTEM_PROMPT_RU if is_russian else SYSTEM_PROMPT_EN
-    escalation_template = ESCALATION_TEMPLATE_RU if is_russian else ESCALATION_TEMPLATE_EN
 
     # Retrieve relevant chunks
     rag_system = get_rag_system()
@@ -276,14 +230,14 @@ async def handle_message(message: Message) -> None:
         )
     except Exception as e:
         logger.error(f"RAG retrieval failed: {e}")
-        await message.answer(escalation_template)
+        await message.answer(ESCALATION_TEMPLATE)
         db.log_interaction(user_id, user_text, "escalated", internal_sources="retrieval_error")
         return
 
     # Check if we have relevant chunks
     if not retrieved_chunks:
         logger.info(f"No chunks retrieved for user {user_id}: {user_text}")
-        await message.answer(escalation_template)
+        await message.answer(ESCALATION_TEMPLATE)
         db.log_interaction(user_id, user_text, "escalated", internal_sources="no_chunks")
         return
 
@@ -318,7 +272,7 @@ async def handle_message(message: Message) -> None:
     or_client = get_openrouter_client()
     try:
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": f"Context from knowledge base:\n\n{context}\n\n---\n\nUser question: {user_text}",
@@ -346,7 +300,7 @@ async def handle_message(message: Message) -> None:
 
     except Exception as e:
         logger.error(f"LLM call failed: {e}")
-        await message.answer(escalation_template)
+        await message.answer(ESCALATION_TEMPLATE)
         db.log_interaction(
             user_id,
             user_text,
@@ -358,10 +312,4 @@ async def handle_message(message: Message) -> None:
 @router.message()
 async def handle_unknown(message: Message) -> None:
     """Handle unknown message types."""
-    db = get_db()
-    user = db.get_user(message.from_user.id)
-
-    if user and user["language"] == "ru":
-        await message.answer("Я понимаю только текстовые сообщения. Пожалуйста, напишите вопрос.")
-    else:
-        await message.answer("I understand text messages only. Please type your question.")
+    await message.answer("I understand text messages only. Please type your question.")
