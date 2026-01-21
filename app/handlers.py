@@ -89,6 +89,7 @@ def normalize_answer_style(text: str) -> Optional[str]:
 def sanitize_user_answer(text: str) -> str:
     """
     Sanitize LLM output to remove citations, sources, and formatting markers.
+    Only escalates (returns empty) on strong source leakage patterns.
     
     Returns:
         - Cleaned text if safe
@@ -96,9 +97,14 @@ def sanitize_user_answer(text: str) -> str:
     """
     import re
     
-    # Check for strong source leakage - if found, return empty to force escalation
-    if any(pattern in text for pattern in ['Sources:', 'References:', '.pdf', '.md', '.txt']):
-        logger.warning("Strong source leakage detected - returning empty string to force escalation")
+    # Check for STRONG source leakage patterns only (not just file extensions in normal text)
+    has_sources_header = 'Sources:' in text or 'References:' in text
+    has_internal_filename = any(re.search(rf'\b[\w-]+{ext}\b', text, re.IGNORECASE) 
+                                 for ext in ['.pdf', '.md', '.txt', '.doc', '.docx'])
+    
+    # Only escalate if we have CLEAR source leakage
+    if has_sources_header or has_internal_filename:
+        logger.warning("Strong source leakage pattern detected - returning empty string to force escalation")
         return ""
     
     cleaned = text
@@ -346,7 +352,8 @@ async def handle_message(message: Message) -> None:
             max_tokens=500,
         )
 
-        # Sanitize response - remove citations, sources, formatting
+        # Sanitize ONLY LLM-generated responses to remove citations, sources, formatting
+        # Static messages (/start, /help, templates) are never sanitized
         sanitized_response = sanitize_user_answer(response)
         
         # Check if strong source leakage was detected (empty string returned)
