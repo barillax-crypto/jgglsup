@@ -113,7 +113,7 @@ async def cmd_start(message: Message) -> None:
         db.set_user_language(user_id, "en")
 
     await message.answer("Hi! My name is Jiggley. I'm an artificial intelligence assistant that will help you set everything up.")
-    await message.answer("To get started, tell me: What exchange are you on? What step are you stuck on? Include an error message or screenshot if possible.")
+    await message.answer("What exchange are you using?")
 
 
 @router.message(Command("help"))
