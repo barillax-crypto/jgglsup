@@ -116,10 +116,10 @@ async def cmd_reset(message: Message) -> None:
 async def cmd_upload_doc(message: Message) -> None:
     """Handle /upload_doc command (admin only, private chat)."""
     if not is_admin(message.from_user.id) or not is_private_chat(message):
-        await message.answer(
-            "This command is not available.\n"
-            "Supported formats: .pdf, .txt, .md"
-        )
+        await message.answer("This command is not available.")
+        return
+    
+    await message.answer("Send a PDF or TXT file.")
 
 
 @router.message(Command("reindex"))
@@ -192,12 +192,10 @@ async def handle_document(message: Message) -> None:
 
     supported = {".pdf", ".txt", ".md"}
     if not any(file_name.endswith(ext) for ext in supported):
-        await message.answer(f"Unsupported file type. Supported: {', '.join(supported)}")
+        await message.answer("Unsupported file type.")
         return
 
     try:
-        await message.answer(f"Processing {file_name}...")
-
         # Download file
         file_info = await message.bot.get_file(message.document.file_id)
         file_path = Config.DOCS_DIR / file_name
@@ -207,17 +205,16 @@ async def handle_document(message: Message) -> None:
 
         # Ingest
         stats = await ingest_document(file_path)
-        await message.answer(
-            f"✅ Document ingested!\n\n"
-            f"File: {file_name}\n"
-            f"Chunks added: {stats['chunks_added']}\n"
-            f"Pages: {stats['pages']}"
-        )
+        
+        # Return confidential response - no file details, chunks, or pages exposed
+        await message.answer("Document uploaded and indexed successfully.")
         logger.info(f"Ingested {file_name}: {stats['chunks_added']} chunks from {stats['pages']} pages")
 
     except Exception as e:
         logger.error(f"Failed to process document: {e}")
-        await message.answer(f"❌ Error processing document: {e}")
+        await message.answer(
+            "Upload failed. Please contact staff bot: https://t.me/JGGLSTAFFBOT"
+        )
 
 
 @router.message(F.text)
