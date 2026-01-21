@@ -59,7 +59,34 @@ def is_sensitive_topic(text: str) -> bool:
     return any(keyword in text_lower for keyword in keywords)
 
 
-def sanitize_user_answer(text: str) -> Optional[str]:
+def normalize_answer_style(text: str) -> Optional[str]:
+    """
+    Enforce support-style output: no bold, no emojis, clean formatting.
+    
+    Returns:
+        - Cleaned text if compliant
+        - None if violations detected (should escalate)
+    """
+    import re
+    import unicodedata
+    
+    # Check for remaining markdown emphasis markers that shouldn't be there
+    has_bold = '**' in text or '__' in text
+    
+    # Check for emojis (Unicode categories S and C)
+    has_emoji = any(unicodedata.category(char)[0] in ('S', 'C') 
+                    for char in text 
+                    if char not in (' ', '\n', '\t', '-', '.', ',', ':', ';', '!', '?', '(', ')', '[', ']', '{', '}', '/', '\\', '"', "'", '"', '"', ''', '''))
+    
+    # If strong violations, escalate
+    if has_bold or has_emoji:
+        logger.warning(f"Style violation detected (bold={has_bold}, emoji={has_emoji}), escalating")
+        return None
+    
+    return text
+
+
+
     """
     Sanitize LLM output to remove citations and source markers.
     
@@ -68,6 +95,7 @@ def sanitize_user_answer(text: str) -> Optional[str]:
         - None if source leakage detected (should escalate)
     """
     import re
+    import unicodedata
     
     # Count potential source markers
     bracket_markers = len(re.findall(r'\[.*?\]', text))  # [anything]
@@ -82,7 +110,7 @@ def sanitize_user_answer(text: str) -> Optional[str]:
     # Perform safe removals
     cleaned = text
     
-    # Remove square bracket citations: [anything] but preserve content after if meaningful
+    # Remove square bracket citations: [anything]
     cleaned = re.sub(r'\[.*?\]', '', cleaned)
     
     # Remove page citations: (p. X), (page X)
@@ -95,10 +123,25 @@ def sanitize_user_answer(text: str) -> Optional[str]:
     # Remove filename-like patterns (e.g., "sup.md", "doc.pdf")
     cleaned = re.sub(r'\b[\w-]+\.(pdf|txt|md|doc|docx)\b', '', cleaned, flags=re.IGNORECASE)
     
-    # Clean up excessive whitespace
+    # Remove markdown bold/underscore emphasis: **text** and __text__
+    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned)  # **text** → text
+    cleaned = re.sub(r'__(.*?)__', r'\1', cleaned)  # __text__ → text
+    
+    # Remove emojis and other Unicode symbols (keep basic punctuation)
+    # Remove categories: So (Symbol other), Sk (Symbol modifier), Sc (Currency), Sm (Math)
+    cleaned = ''.join(
+        char for char in cleaned
+        if unicodedata.category(char)[0] not in ('S', 'C')  # Skip symbols and separators
+        or char in (' ', '\n', '\t', '-', '.', ',', ':', ';', '!', '?', '(', ')', '[', ']', '{', '}', '/', '\\', '"', "'")
+    )
+    
+    # Clean up excessive whitespace and line breaks
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Restore intentional line breaks (convert multiple spaces before newlines back)
+    cleaned = cleaned.replace(' \n', '\n').replace('\n ', '\n')
     
     return cleaned if cleaned else None
+
 
 
 @router.message(Command("start"))
@@ -326,7 +369,7 @@ async def handle_message(message: Message) -> None:
             max_tokens=500,
         )
 
-        # Sanitize response to remove any citations or source markers
+        # First sanitize to remove citations
         sanitized_response = sanitize_user_answer(response)
         
         if sanitized_response is None:
@@ -335,18 +378,27 @@ async def handle_message(message: Message) -> None:
             await message.answer(ESCALATION_TEMPLATE)
             db.log_interaction(user_id, user_text, "escalated", internal_sources="source_leakage")
         else:
-            # Send sanitized response to user
-            await message.answer(sanitized_response)
+            # Then normalize style (remove bold, emojis)
+            normalized_response = normalize_answer_style(sanitized_response)
             
-            # Log interaction with internal metadata (server-side only)
-            db.log_interaction(
-                user_id,
-                user_text,
-                "answered",
-                internal_sources=internal_sources,
-                retrieval_scores=retrieval_scores,
-            )
-            logger.info(f"Answered user {user_id}: {user_text[:50]}...")
+            if normalized_response is None:
+                # Style violations detected - escalate
+                logger.warning(f"Style violations detected in response for user {user_id}, escalating")
+                await message.answer(ESCALATION_TEMPLATE)
+                db.log_interaction(user_id, user_text, "escalated", internal_sources="style_violation")
+            else:
+                # Send cleaned response to user
+                await message.answer(normalized_response)
+                
+                # Log interaction with internal metadata (server-side only)
+                db.log_interaction(
+                    user_id,
+                    user_text,
+                    "answered",
+                    internal_sources=internal_sources,
+                    retrieval_scores=retrieval_scores,
+                )
+                logger.info(f"Answered user {user_id}: {user_text[:50]}...")
 
     except Exception as e:
         logger.error(f"LLM call failed: {e}")
