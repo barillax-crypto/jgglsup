@@ -44,7 +44,10 @@ def is_private_chat(message: Message) -> bool:
 def is_source_request(text: str) -> bool:
     """Detect if user is asking for sources or documents."""
     # Always ask for language, even if set (to reset)
-]
+    keywords = [
+        "sources", "references", "links", "documentation", "docs",
+        "where did you get", "source", "cite", "citation",
+    ]
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in keywords)
 
