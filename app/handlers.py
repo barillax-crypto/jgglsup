@@ -59,6 +59,48 @@ def is_sensitive_topic(text: str) -> bool:
     return any(keyword in text_lower for keyword in keywords)
 
 
+def sanitize_user_answer(text: str) -> Optional[str]:
+    """
+    Sanitize LLM output to remove citations and source markers.
+    
+    Returns:
+        - Cleaned text if safe removals possible
+        - None if source leakage detected (should escalate)
+    """
+    import re
+    
+    # Count potential source markers
+    bracket_markers = len(re.findall(r'\[.*?\]', text))  # [anything]
+    paren_citations = len(re.findall(r'\(p\.|page\s+\d', text, re.IGNORECASE))  # (p. X), (page X)
+    has_sources_header = bool(re.search(r'(Sources|References):', text, re.IGNORECASE))
+    
+    # Strong source leakage detected - escalate instead of clean
+    if has_sources_header or bracket_markers >= 3 or (bracket_markers > 0 and has_sources_header):
+        logger.warning(f"Strong source leakage detected in LLM output, triggering escalation")
+        return None
+    
+    # Perform safe removals
+    cleaned = text
+    
+    # Remove square bracket citations: [anything] but preserve content after if meaningful
+    cleaned = re.sub(r'\[.*?\]', '', cleaned)
+    
+    # Remove page citations: (p. X), (page X)
+    cleaned = re.sub(r'\(p\.\s*\d+\)', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\(page\s+\d+\)', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove "Sources:" or "References:" section headers and following lines
+    cleaned = re.sub(r'\n?(Sources|References):[^\n]*(\n[^\n]*)*', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove filename-like patterns (e.g., "sup.md", "doc.pdf")
+    cleaned = re.sub(r'\b[\w-]+\.(pdf|txt|md|doc|docx)\b', '', cleaned, flags=re.IGNORECASE)
+    
+    # Clean up excessive whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    return cleaned if cleaned else None
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     """Handle /start command."""
@@ -284,18 +326,27 @@ async def handle_message(message: Message) -> None:
             max_tokens=500,
         )
 
-        # Send response WITHOUT sources/metadata to user
-        await message.answer(response)
-
-        # Log interaction with internal metadata (server-side only)
-        db.log_interaction(
-            user_id,
-            user_text,
-            "answered",
-            internal_sources=internal_sources,
-            retrieval_scores=retrieval_scores,
-        )
-        logger.info(f"Answered user {user_id}: {user_text[:50]}...")
+        # Sanitize response to remove any citations or source markers
+        sanitized_response = sanitize_user_answer(response)
+        
+        if sanitized_response is None:
+            # Strong source leakage detected - escalate instead
+            logger.warning(f"Source leakage detected in response for user {user_id}, escalating")
+            await message.answer(ESCALATION_TEMPLATE)
+            db.log_interaction(user_id, user_text, "escalated", internal_sources="source_leakage")
+        else:
+            # Send sanitized response to user
+            await message.answer(sanitized_response)
+            
+            # Log interaction with internal metadata (server-side only)
+            db.log_interaction(
+                user_id,
+                user_text,
+                "answered",
+                internal_sources=internal_sources,
+                retrieval_scores=retrieval_scores,
+            )
+            logger.info(f"Answered user {user_id}: {user_text[:50]}...")
 
     except Exception as e:
         logger.error(f"LLM call failed: {e}")
