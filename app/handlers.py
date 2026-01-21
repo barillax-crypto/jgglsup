@@ -86,65 +86,42 @@ def normalize_answer_style(text: str) -> Optional[str]:
     return text
 
 
-
+def sanitize_user_answer(text: str) -> str:
     """
-    Sanitize LLM output to remove citations and source markers.
+    Sanitize LLM output to remove citations, sources, and formatting markers.
     
     Returns:
-        - Cleaned text if safe removals possible
-        - None if source leakage detected (should escalate)
+        - Cleaned text if safe
+        - Empty string if strong source leakage detected (triggers escalation)
     """
     import re
-    import unicodedata
     
-    # Count potential source markers
-    bracket_markers = len(re.findall(r'\[.*?\]', text))  # [anything]
-    paren_citations = len(re.findall(r'\(p\.|page\s+\d', text, re.IGNORECASE))  # (p. X), (page X)
-    has_sources_header = bool(re.search(r'(Sources|References):', text, re.IGNORECASE))
+    # Check for strong source leakage - if found, return empty to force escalation
+    if any(pattern in text for pattern in ['Sources:', 'References:', '.pdf', '.md', '.txt']):
+        logger.warning("Strong source leakage detected - returning empty string to force escalation")
+        return ""
     
-    # Strong source leakage detected - escalate instead of clean
-    if has_sources_header or bracket_markers >= 3 or (bracket_markers > 0 and has_sources_header):
-        logger.warning(f"Strong source leakage detected in LLM output, triggering escalation")
-        return None
-    
-    # Perform safe removals
     cleaned = text
     
-    # Remove square bracket citations: [anything]
+    # Remove markdown emphasis markers
+    cleaned = cleaned.replace('**', '').replace('__', '')
+    
+    # Remove bracket citations [anything]
     cleaned = re.sub(r'\[.*?\]', '', cleaned)
     
-    # Remove page citations: (p. X), (page X)
-    cleaned = re.sub(r'\(p\.\s*\d+\)', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\(page\s+\d+\)', '', cleaned, flags=re.IGNORECASE)
-    
-    # Remove "Sources:" or "References:" section headers and following lines
-    cleaned = re.sub(r'\n?(Sources|References):[^\n]*(\n[^\n]*)*', '', cleaned, flags=re.IGNORECASE)
-    
-    # Remove filename-like patterns (e.g., "sup.md", "doc.pdf")
-    cleaned = re.sub(r'\b[\w-]+\.(pdf|txt|md|doc|docx)\b', '', cleaned, flags=re.IGNORECASE)
-    
-    # Remove markdown bold/underscore emphasis: **text** and __text__
-    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned)  # **text** → text
-    cleaned = re.sub(r'__(.*?)__', r'\1', cleaned)  # __text__ → text
-    
-    # Remove emojis and other Unicode symbols (keep basic punctuation)
-    # Remove categories: So (Symbol other), Sk (Symbol modifier), Sc (Currency), Sm (Math)
+    # Remove emojis and non-ASCII symbols (keep basic punctuation)
     cleaned = ''.join(
         char for char in cleaned
-        if unicodedata.category(char)[0] not in ('S', 'C')  # Skip symbols and separators
-        or char in (' ', '\n', '\t', '-', '.', ',', ':', ';', '!', '?', '(', ')', '[', ']', '{', '}', '/', '\\', '"', "'")
+        if ord(char) < 128 or char in ('\n', '\t')  # Keep ASCII + line breaks
     )
     
-    # Clean up excessive whitespace and line breaks
+    # Clean up excessive whitespace
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    # Restore intentional line breaks (convert multiple spaces before newlines back)
-    cleaned = cleaned.replace(' \n', '\n').replace('\n ', '\n')
     
-    return cleaned if cleaned else None
+    return cleaned
 
 
 
-@router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     """Handle /start command."""
     user_id = message.from_user.id
@@ -369,36 +346,27 @@ async def handle_message(message: Message) -> None:
             max_tokens=500,
         )
 
-        # First sanitize to remove citations
+        # Sanitize response - remove citations, sources, formatting
         sanitized_response = sanitize_user_answer(response)
         
-        if sanitized_response is None:
-            # Strong source leakage detected - escalate instead
+        # Check if strong source leakage was detected (empty string returned)
+        if not sanitized_response:
             logger.warning(f"Source leakage detected in response for user {user_id}, escalating")
             await message.answer(ESCALATION_TEMPLATE)
             db.log_interaction(user_id, user_text, "escalated", internal_sources="source_leakage")
         else:
-            # Then normalize style (remove bold, emojis)
-            normalized_response = normalize_answer_style(sanitized_response)
+            # Send cleaned response to user
+            await message.answer(sanitized_response)
             
-            if normalized_response is None:
-                # Style violations detected - escalate
-                logger.warning(f"Style violations detected in response for user {user_id}, escalating")
-                await message.answer(ESCALATION_TEMPLATE)
-                db.log_interaction(user_id, user_text, "escalated", internal_sources="style_violation")
-            else:
-                # Send cleaned response to user
-                await message.answer(normalized_response)
-                
-                # Log interaction with internal metadata (server-side only)
-                db.log_interaction(
-                    user_id,
-                    user_text,
-                    "answered",
-                    internal_sources=internal_sources,
-                    retrieval_scores=retrieval_scores,
-                )
-                logger.info(f"Answered user {user_id}: {user_text[:50]}...")
+            # Log interaction with internal metadata (server-side only)
+            db.log_interaction(
+                user_id,
+                user_text,
+                "answered",
+                internal_sources=internal_sources,
+                retrieval_scores=retrieval_scores,
+            )
+            logger.info(f"Answered user {user_id}: {user_text[:50]}...")
 
     except Exception as e:
         logger.error(f"LLM call failed: {e}")
