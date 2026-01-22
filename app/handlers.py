@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 from app.config import Config
@@ -127,7 +127,7 @@ def sanitize_user_answer(text: str) -> str:
     return cleaned
 
 
-
+@router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     """Handle /start command."""
     user_id = message.from_user.id
@@ -139,7 +139,7 @@ async def cmd_start(message: Message) -> None:
         db.set_user_language(user_id, "en")
 
     await message.answer("Hi! My name is Jiggley. I'm an artificial intelligence assistant that will help you set everything up.")
-    await message.answer("What exchange are you using?")
+    await message.answer("Tell me which exchange/platform you're using, what step you're on, and what error you see (a screenshot helps).")
 
 
 @router.message(Command("help"))
