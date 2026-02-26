@@ -1,0 +1,41 @@
+version: '3.9'
+services:
+  api:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ../:/app
+    command: bash -lc "pip install -r requirements.txt && uvicorn pipeline_visibility.backend.main:app --host 0.0.0.0 --port 8010"
+    ports:
+      - "8010:8010"
+    environment:
+      - PVD_DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/pipeline_visibility
+      - PVD_REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ../:/app
+    command: bash -lc "pip install -r requirements.txt && celery -A pipeline_visibility.backend.celery_app.celery_app worker -l info"
+    environment:
+      - PVD_DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/pipeline_visibility
+      - PVD_REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  redis:
+    image: redis:7-alpine
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: pipeline_visibility
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"

@@ -356,3 +356,9 @@ MIT
 ## Support
 
 Contact: https://t.me/JGGLSTAFFBOT
+
+## Pipeline Visibility Dashboard MVP
+
+В репозитории добавлен MVP SaaS "Pipeline Visibility Dashboard" в папке `pipeline_visibility/`.
+Запуск API: `uvicorn pipeline_visibility.backend.main:app --reload --port 8010`.
+Подробности: `pipeline_visibility/backend/README.md`.
